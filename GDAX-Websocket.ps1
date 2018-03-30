@@ -9,15 +9,10 @@ $js = @"
         "ETH-BTC",
         "ETH-EUR",
         "LTC-BTC",
-        "LTC-EUR",
-        "LTC-USD",
-        "ETH-USD",
-        "BTC-USD",
-        "BCH-USD",
-        "BCH-EUR",
-        "BCH-BTC"
+        "LTC-EUR"
     ],
     "channels": [
+        "level2",
         {
             "name": "ticker",
             "product_ids": [
@@ -26,13 +21,7 @@ $js = @"
                 "ETH-BTC",
                 "ETH-EUR",
                 "LTC-BTC",
-                "LTC-EUR",
-                "LTC-USD",
-                "ETH-USD",
-                "BTC-USD",
-                "BCH-USD",
-                "BCH-EUR",
-                "BCH-BTC"
+                "LTC-EUR"
             ]
         }
     ]
@@ -102,25 +91,50 @@ $js = @"
     $Session.BeginInvoke()
 
     # Create empty byte array. 
-    $R = ""
     $Size = 1024
     $Array = [byte[]] @(,0) * $Size
     $Recv = New-Object System.ArraySegment[byte] -ArgumentList @(,$Array)
 
         while ($w.State -eq 'open') {
         # Receive data from websocket
+        Set-Location Env:
+
         $t = $W.ReceiveAsync($Recv, $C)
+            $R = [System.Text.Encoding]::ASCII.GetString($Recv,0,($t.Result.Count))
 
-        $Recv.Array[0..($t.Result.Count - 1)] | ForEach-Object { $R = $R + [char]$_ }
-        $result = $R | ConvertFrom-Json -ErrorAction SilentlyContinue
-        $resultstring = $R.ToString()
+        While ($t.Result.EndOfMessage -eq $false) {
+            $Size = 1024
+            $Array = [byte[]] @(,0) * $Size
+            $Recv = New-Object System.ArraySegment[byte] -ArgumentList @(,$Array)
+            $t = $w.ReceiveAsync($recv, $c)
+            $a = [System.Text.Encoding]::ASCII.GetString($Recv,0,($t.Result.Count))
+            $R = ($R+$a)
+            }
 
-        # Sort results and create env variables. 
-        if ($result.type -eq 'ticker') {
-            Set-Location Env:
-            $product = $result.product_id -replace "-",""
-            New-Item $product -Value $resultstring -Force
-        }
+            $result = $R | ConvertFrom-Json -ErrorAction SilentlyContinue
+            Switch ($result.type)
+            {
+            'Snapshot' 
+                {
+                $bids = $results.bids -split ','
+
+                $asks = $results.asks -split ','
+
+                }    
+            'ticker'
+                {
+                    $resultstring = $R.ToString()
+                    $product = $result.product_id -replace "-",""
+                    $null = New-Item $product -Value $resultstring -Force    
+                }  
+            'l2update'
+                {
+                    Write-Host "update"
+                } 
+            }
+
+        # Heartbeat to stop webserver.
+        #$null = New-Item 'Heartbeat' -Value (get-Date) -Force
 
         Clear-Variable "R","Result" -Force
     } 
